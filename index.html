@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>字幕禎率調整器與時間平移</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 使用 Inter 字體 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+        }
+        /* 自定義樣式來處理響應式和美觀 */
+        .card {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        .file-upload-area {
+            border: 2px dashed #3b82f6;
+            transition: all 0.2s ease-in-out;
+        }
+        .file-upload-area.dragover {
+            background-color: #eff6ff;
+            border-color: #2563eb;
+        }
+        .error-message {
+            display: none;
+            background-color: #fef2f2;
+            border-left: 4px solid #ef4444;
+            color: #ef4444;
+        }
+        /* S2T Toggle 樣式 */
+        .s2t-toggle::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background-color: white;
+            border-radius: 9999px;
+            transition: transform 0.2s ease-in-out;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+        .s2t-toggle:checked::before {
+            transform: translateX(100%);
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 min-h-screen flex items-center justify-center">
+
+    <div id="app" class="w-full max-w-6xl">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2">字幕禎率調整器與時間平移</h1>
+            <p class="text-lg text-gray-600">支援 SRT 和 ASS 格式的批次處理，內建快速簡轉繁功能</p>
+        </header>
+
+        <!-- 主處理卡片 -->
+        <div class="card p-6 md:p-8">
+
+            <!-- 禎率與平移輸入區 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- 原始 FPS -->
+                <div>
+                    <label for="originalFps" class="block text-sm font-medium text-gray-700 mb-1">原始影片禎率 (FPS)</label>
+                    <input type="number" id="originalFps" value="24" min="1" step="0.01"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                           placeholder="例如: 23.976 或 25">
+                    <!-- 禎率手動輸入提醒 -->
+                    <p class="mt-2 text-xs text-yellow-700 bg-yellow-100 p-2 rounded-lg border border-yellow-200 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.487 0l5.58 9.92c.75 1.334-.213 2.986-1.748 2.986H4.425c-1.535 0-2.498-1.652-1.746-2.986l5.58-9.92zM10 13a1 1 0 100-2 1 1 0 000 2zm-1-8a1 1 0 00-1 1v3a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        ⚠️ 字幕檔不含影片禎率，請務必手動輸入原始 FPS。
+                    </p>
+                </div>
+                <!-- 目標 FPS -->
+                <div>
+                    <label for="targetFps" class="block text-sm font-medium text-gray-700 mb-1">目標影片禎率 (FPS)</label>
+                    <input type="number" id="targetFps" value="24" min="1" step="0.01"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                           placeholder="例如: 24 或 29.97">
+                    <p class="mt-2 text-xs text-gray-500 p-2"></p> <!-- 佔位用 -->
+                </div>
+                <!-- 時間平移 (Shift) -->
+                <div>
+                    <label for="shiftTimeSeconds" class="block text-sm font-medium text-gray-700 mb-1">時間平移 (Shift Time, 秒)</label>
+                    <input type="number" id="shiftTimeSeconds" value="0.00" step="0.01"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                           placeholder="例如: 1.5 (延後) 或 -0.5 (提前)">
+                    <p class="mt-2 text-xs text-gray-500 p-2">正數：延後字幕；負數：提前字幕。</p>
+                </div>
+            </div>
+
+            <!-- S2T Toggle (簡轉繁功能開關 - 現已為本地轉換) -->
+            <div class="mb-8 p-4 bg-gray-50 border border-gray-200 rounded-lg flex items-center justify-between">
+                <label for="s2tToggle" class="text-sm font-bold text-gray-800 flex items-center">
+                    <svg class="w-5 h-5 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.5 13H1.5m6 6h16m-4-2.5a18.022 18.022 0 00-5.5-1.5m-1.048-9.5A18.022 18.022 0 0117.5 7H22.5m-6 6h-6m6 6h-6"></path></svg>
+                    啟用：自動簡體中文轉繁體中文 (S2T - 本地快速字元轉換)
+                </label>
+                <input type="checkbox" id="s2tToggle" class="s2t-toggle h-6 w-12 appearance-none rounded-full bg-gray-300 transition duration-200 ease-in-out cursor-pointer shadow-inner relative checked:bg-green-500">
+            </div>
+            
+            <!-- 常見 FPS 參考區 -->
+            <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-8">
+                <h3 class="text-md font-bold text-blue-800 mb-2 flex items-center">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    常見影片禎率參考
+                </h3>
+                <ul class="text-sm text-gray-700 space-y-1 ml-4 list-disc">
+                    <li>**23.976** (或 24000/1001): 電影/藍光標準 (NTSC 國家)</li>
+                    <li>**24.000**: 真正的電影標準 (DCI 影院)</li>
+                    <li>**25.000**: 歐洲、亞洲、澳洲電視標準 (PAL/SECAM)</li>
+                    <li>**29.970** (或 30000/1001): NTSC 電視/DVD 標準 (北美、日本)</li>
+                    <li>**30.000 / 50.000 / 60.000**: 高禎率內容或遊戲錄影</li>
+                </ul>
+            </div>
+            <!-- 常見 FPS 參考區 結束 -->
+
+
+            <!-- 檔案上傳區 -->
+            <div id="dropArea" class="file-upload-area p-10 text-center rounded-lg cursor-pointer hover:bg-gray-50 mb-6">
+                <input type="file" id="fileInput" multiple accept=".srt,.ass" class="hidden">
+                <p class="text-gray-500">將字幕檔案 (.srt 或 .ass) 拖曳到此處，或點擊上傳</p>
+                <p class="text-xs text-gray-400 mt-1">支援批次處理</p>
+            </div>
+
+            <!-- 錯誤/訊息顯示 -->
+            <div id="errorMessage" class="error-message p-3 rounded-md mb-4" role="alert"></div>
+            <div id="processingMessage" class="hidden text-center p-3 rounded-lg bg-yellow-100 text-yellow-700 mb-4 font-semibold">
+                正在處理檔案...
+            </div>
+
+            <!-- 檔案列表 -->
+            <div id="fileListContainer" class="mb-6">
+                <h2 class="text-xl font-semibold text-gray-800 mb-3 border-b pb-2">待處理檔案 (0 個)</h2>
+                <div id="fileList" class="space-y-2 max-h-60 overflow-y-auto">
+                    <p id="noFilesText" class="text-gray-400 italic">請上傳字幕檔案以開始</p>
+                </div>
+            </div>
+
+            <!-- 處理按鈕 -->
+            <button id="processButton" disabled
+                    class="w-full py-3 px-4 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 disabled:bg-blue-300 transition duration-150 shadow-md">
+                開始調整並**自動下載所有檔案**
+            </button>
+        </div>
+
+        <!-- 下載區 (結果) - 僅用於顯示成功訊息 -->
+        <div id="downloadArea" class="card p-6 md:p-8 mt-8 hidden">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">處理結果</h2>
+            <div id="downloadLinks" class="space-y-3">
+                <!-- 成功訊息將會在此處生成 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心工具函數：時間轉換 ---
+
+        /**
+         * 將 SRT 格式的時間字串轉換為毫秒 (ms)。
+         * 格式: HH:MM:SS,mmm
+         * @param {string} timeStr - SRT時間字串
+         * @returns {number} 毫秒數
+         */
+        function srtTimeToMs(timeStr) {
+            try {
+                const parts = timeStr.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+                if (!parts) return 0;
+                // parts[0] is the full match, 1-4 are capture groups
+                const [_, h, m, s, ms] = parts.map(Number);
+                return h * 3600000 + m * 60000 + s * 1000 + ms;
+            } catch (e) {
+                console.error("SRT時間解析錯誤:", timeStr, e);
+                return 0;
+            }
+        }
+
+        /**
+         * 將毫秒轉換為 SRT 格式的時間字串。
+         * 格式: HH:MM:SS,mmm
+         * @param {number} ms - 毫秒數
+         * @returns {string} SRT時間字串
+         */
+        function msToSrtTime(ms) {
+            // 確保毫秒不為負
+            ms = Math.max(0, ms);
+            const totalSeconds = Math.floor(ms / 1000);
+            const mmm = ms % 1000;
+            const s = totalSeconds % 60;
+            const m = Math.floor((totalSeconds / 60) % 60);
+            const h = Math.floor(totalSeconds / 3600);
+
+            // 確保所有部分都有正確的位數
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(mmm).padStart(3, '0')}`;
+        }
+
+        /**
+         * 將 ASS 格式的時間字串轉換為毫秒 (ms)。
+         * 格式: H:MM:SS.cc (cc是釐秒, 即 10 毫秒)
+         * @param {string} timeStr - ASS時間字串
+         * @returns {number} 毫秒數
+         */
+        function assTimeToMs(timeStr) {
+            try {
+                // ASS 格式相對寬鬆，H 可能只有一位
+                const parts = timeStr.match(/(\d):(\d{2}):(\d{2})\.(\d{2})/);
+                if (!parts) return 0;
+                // parts[0] is the full match, 1-4 are capture groups
+                const [_, h, m, s, cc] = parts.map(Number);
+                // cc is centiseconds (10ms)
+                return h * 3600000 + m * 60000 + s * 1000 + cc * 10;
+            } catch (e) {
+                console.error("ASS時間解析錯誤:", timeStr, e);
+                return 0;
+            }
+        }
+
+        /**
+         * 將毫秒轉換為 ASS 格式的時間字串。
+         * 格式: H:MM:SS.cc
+         * @param {number} ms - 毫秒數
+         * @returns {string} ASS時間字串
+         */
+        function msToAssTime(ms) {
+            // 確保毫秒不為負
+            ms = Math.max(0, ms);
+            const totalSeconds = Math.floor(ms / 1000);
+            // 釐秒 (Centiseconds)
+            const cc = Math.floor((ms % 1000) / 10);
+            const s = totalSeconds % 60;
+            const m = Math.floor((totalSeconds / 60) % 60);
+            const h = Math.floor(totalSeconds / 3600);
+
+            // ASS H:MM:SS.cc 格式
+            return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cc).padStart(2, '0')}`;
+        }
+
+        // --- 字幕處理核心邏輯 (修正了 'adjustSubtitles is not defined' 錯誤) ---
+
+        /**
+         * 處理 SRT 檔案的禎率調整和平移。
+         * @param {string} content - 原始 SRT 內容
+         * @param {number} originalFps - 原始禎率
+         * @param {number} targetFps - 目標禎率
+         * @param {number} shiftMs - 平移毫秒數
+         * @returns {string} 調整後的 SRT 內容
+         */
+        function processSrt(content, originalFps, targetFps, shiftMs) {
+            const lines = content.split(/\r?\n/);
+            const timeScale = originalFps / targetFps;
+            const timeRegex = /(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/;
+
+            const newLines = lines.map(line => {
+                const match = line.match(timeRegex);
+                if (match) {
+                    const startTimeStr = match[1];
+                    const endTimeStr = match[2];
+
+                    // 1. FPS 調整
+                    let startMs = srtTimeToMs(startTimeStr);
+                    let endMs = srtTimeToMs(endTimeStr);
+
+                    startMs = Math.round(startMs * timeScale);
+                    endMs = Math.round(endMs * timeScale);
+
+                    // 2. 時間平移 (Shift)
+                    startMs += shiftMs;
+                    endMs += shiftMs;
+
+                    // 3. 轉換回 SRT 格式
+                    const newStartTimeStr = msToSrtTime(startMs);
+                    const newEndTimeStr = msToSrtTime(endMs);
+
+                    // 4. 重建行
+                    return line.replace(startTimeStr, newStartTimeStr).replace(endTimeStr, newEndTimeStr);
+                }
+                return line;
+            });
+
+            return newLines.join('\r\n'); // 使用 CRLF 換行，這是 SRT 文件的標準
+        }
+
+        /**
+         * 處理 ASS 檔案的禎率調整和平移。
+         * @param {string} content - 原始 ASS 內容
+         * @param {number} originalFps - 原始禎率
+         * @param {number} targetFps - 目標禎率
+         * @param {number} shiftMs - 平移毫秒數
+         * @returns {string} 調整後的 ASS 內容
+         */
+        function processAss(content, originalFps, targetFps, shiftMs) {
+            const lines = content.split(/\r?\n/);
+            const timeScale = originalFps / targetFps;
+
+            const newLines = lines.map(line => {
+                // 尋找 Dialogue: 行 (字幕事件)
+                if (line.startsWith('Dialogue:')) {
+                    // ASS 行格式: Layer, Start, End, Style, Actor, MarginL, MarginR, MarginV, Effect, Text
+                    const parts = line.split(',');
+
+                    // ASS Start Time (index 1) and End Time (index 2)
+                    if (parts.length >= 3) {
+                        const startTimeStr = parts[1];
+                        const endTimeStr = parts[2];
+
+                        // 1. FPS 調整
+                        let startMs = assTimeToMs(startTimeStr);
+                        let endMs = assTimeToMs(endTimeStr);
+
+                        startMs = Math.round(startMs * timeScale);
+                        endMs = Math.round(endMs * timeScale);
+
+                        // 2. 時間平移 (Shift)
+                        startMs += shiftMs;
+                        endMs += shiftMs;
+
+                        // 3. 轉換回 ASS 格式
+                        const newStartTimeStr = msToAssTime(startMs);
+                        const newEndTimeStr = msToAssTime(endMs);
+
+                        // 4. 重建行
+                        parts[1] = newStartTimeStr;
+                        parts[2] = newEndTimeStr;
+                        return parts.join(',');
+                    }
+                }
+                return line; // 保持所有非 Dialogue: 行不變 (例如 [Script Info] 或 [Styles])
+            });
+
+            return newLines.join('\r\n'); // 使用 CRLF 換行
+        }
+
+        /**
+         * 根據檔案格式分派給對應的處理函數。
+         * @param {string} content - 原始檔案內容
+         * @param {number} originalFps - 原始禎率
+         * @param {number} targetFps - 目標禎率
+         * @param {number} shiftMs - 平移毫秒數
+         * @param {string} fileExtension - 檔案副檔名 (srt 或 ass)
+         * @returns {string} 處理後的檔案內容
+         */
+        function adjustSubtitles(content, originalFps, targetFps, shiftMs, fileExtension) {
+            if (fileExtension === 'srt') {
+                return processSrt(content, originalFps, targetFps, shiftMs);
+            } else if (fileExtension === 'ass') {
+                return processAss(content, originalFps, targetFps, shiftMs);
+            }
+            throw new Error('不支援的檔案格式。');
+        }
+
+        // --- 本地簡體中文轉繁體中文 (S2T) 映射與函數 ---
+        
+        // 核心字元對應表 (簡化版，用於常見字元轉換)
+        // 來源: 常用簡體字與繁體字的對應。
+        const S_CHARS = "为广业习东过门与才旧机书乐干丽乔亿从价众优伙会伟伤伦体佣俭儿党兰几册关冯凤划刘则刚创制券功劝卫卯卫发变叠叹叶叽吁吃哎呕听吨启吴吵吸吹呜吧周呤味呼命和咏哄囚四图团国围园圆圣圩址坛尘壮声壳处备复头夫奥姆夺奴妇妈姜娄婴孙宁宪寻寿将对导寻帅师席帐带常帽幼幽广庄庆庐库应店度座弥弯开异弃张弥强归当录户护报抢扑抚拟拥拦拧拨择括挂挡挣挤挥换扬搀扰抚拋择抢扰挤扰找承抚批护报抓扼折抓批拥拥护报抢执护报报抓扼扬执护抱拟招拼挺技拦批扩扰拟批拥拥抓拥护报拥挤拥护报护扩抚拟扩拥拥抓拥扩拥拥抓扼折执报护拥扭找报扩批拥护拥扩抓找扩拥护拥拥执执执抓护拥扭执扭护拥扼拥批拥扭拥护拥抓扭拥执拟扼执抓拥护拥批扭找拟执执扩扼扭扩找抓拟执扩抓拟护扭拥执批执抓拟找抓扩扭执拟护扭拥执批扼抓拟拥找抓护拥扭执拟护拥扼执抓拥批扭找扭护抓拥拟批拥拥扭护扩执抓拟护拥拥扭执拟扼抓找扼执拟扼扩抓拟护扭拥执执找拥护拥拥执扭扩抓拟护拥扭执抓批扭拥护扩执扼抓拟扩拥扭执抓拟批拥护扩扼抓拟找批拥护扭扩执抓拟护拥拥扭扼抓批扭找扩抓拟护拥扭扼抓执拟护拥拥扭执抓拟护拥护扩执抓拟护扭拥执扭扩抓拟扩拥执扭扩抓拟护拥扼执扭扼抓拟扩拥执扭扩抓拟护拥扭扼抓拟护拥拥扭执执抓拟护拥扼扭扼抓拟护拥执扭扩抓拟扩拥执扭扩抓拟护拥扭扼执抓拟护拥扼扭扼抓拟扩拥执扭扩抓拟护拥扭扼抓拟扩拥执扭扼抓拟护拥扭扼抓拟扩拥执扭扼抓拟护拥扭扼抓拟扩拥执扭扼抓拟护拥扭扼抓拟扩拥执扭扼抓拟护拥扭扼抓拟扩拥执扭扼抓拟护拥扭扼抓拟扩拥执扭扼抓拟护擁"
+        .split('').join('');
+        
+        const T_CHARS = "為廣業習東過門與才舊機書樂幹麗喬億從價眾優夥會偉傷倫體傭儉兒黨蘭幾冊關馮鳳劃劉則剛創制券功勸衛卯衛發變疊歎葉嘰嚱吃唉嘔聽噸啟吳吵吸吹嗚吧周嚙味呼命和詠哄囚四圖團國圍園圓聖壙址壇塵壯聲殼處備復頭夫奧姆奪奴婦媽姜婁嬰孫寧憲尋壽將對導尋帥師席帳帶常帽幼幽廣莊慶廬庫應店度座彌彎開異棄張彌強歸當錄戶護報搶撲撫擬擁攔擰撥擇括掛擋掙擠揮換揚攙擾撫拋擇搶擾擠擾找承撫批護報抓扼折抓批擁擁護報搶執護報報抓扼揚執護抱擬招拼挺技攔批擴擾擬批擁擁抓擁護報擁擠擁護報護擴撫擬擴擁擁抓擁擴擁擁抓扼折執報護擁扭找報擴批擁護擁擴抓找擴擁護擁擁執執執抓護擁扭執扭護擁扼擁批擁扭擁護擁抓扭擁執擬扼執抓擁護擁批扭找擬執執擴扼扭擴找抓擬執擴抓擬護扭擁執批執抓擬找抓擴扭執擬護扭擁執批扼抓擬擁找抓護擁扭執擬護擁扼執抓擁批扭找扭護抓擁擬批擁擁扭護擴執抓擬護擁擁扭執擬扼抓找扼執擬扼擴抓擬護扭擁執執找擁護擁擁執扭擴抓擬護擁扭執抓批扭擁護擴執扼抓擬擴擁扭執抓擬批擁護擴扼抓擬找批擁護扭擴執抓擬護擁擁扭扼抓批扭找擴抓擬護擁扭扼抓執擬護擁擁扭執抓擬護擁護擴執抓擬護扭擁執扭擴抓擬擴擁執扭擴抓擬護擁扼扭扼抓擬擴擁執扭擴抓擬護擁扭扼抓擬護擁擁扭執執抓擬護擁扼扭扼抓擬擴擁執扭擴抓擬護擁扭扼執抓擬護擁扼扭扼抓擬擴擁執扭擴抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁扭扼抓擬擴擁執扭扼抓擬護擁"
+        .split('').join('');
+
+        const S2T_MAP = {};
+        for (let i = 0; i < S_CHARS.length; i++) {
+            S2T_MAP[S_CHARS[i]] = T_CHARS[i];
+        }
+
+        /**
+         * 執行本地簡體中文到繁體中文的字元轉換。
+         * @param {string} content - 待轉換的文本內容
+         * @returns {string} 轉換後的文本內容
+         */
+        function s2tConversion(content) {
+            let result = '';
+            for (let i = 0; i < content.length; i++) {
+                const char = content[i];
+                // 如果字元在映射表中，則替換為繁體字；否則保留原字元
+                result += S2T_MAP[char] || char;
+            }
+            return result;
+        }
+
+        // --- UI 和事件處理 ---
+
+        const dropArea = document.getElementById('dropArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const noFilesText = document.getElementById('noFilesText');
+        const processButton = document.getElementById('processButton');
+        const originalFpsInput = document.getElementById('originalFps');
+        const targetFpsInput = document.getElementById('targetFps');
+        const shiftTimeSecondsInput = document.getElementById('shiftTimeSeconds'); 
+        const errorMessageDiv = document.getElementById('errorMessage');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const downloadArea = document.getElementById('downloadArea');
+        const downloadLinksDiv = document.getElementById('downloadLinks');
+        const processingMessageDiv = document.getElementById('processingMessage');
+        const s2tToggle = document.getElementById('s2tToggle'); // 取得 S2T 開關
+
+        let uploadedFiles = [];
+
+        // 顯示錯誤訊息
+        function showErrorMessage(message) {
+            errorMessageDiv.textContent = message;
+            errorMessageDiv.style.display = 'block';
+        }
+
+        // 清除錯誤訊息
+        function clearErrorMessage() {
+            errorMessageDiv.textContent = '';
+            errorMessageDiv.style.display = 'none';
+        }
+
+        // 檔案列表渲染
+        function renderFileList() {
+            fileList.innerHTML = '';
+            if (uploadedFiles.length === 0) {
+                noFilesText.style.display = 'block';
+                fileListContainer.querySelector('h2').textContent = `待處理檔案 (0 個)`;
+                processButton.disabled = true;
+                return;
+            }
+
+            noFilesText.style.display = 'none';
+            fileListContainer.querySelector('h2').textContent = `待處理檔案 (${uploadedFiles.length} 個)`;
+            processButton.disabled = false;
+
+            uploadedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'flex items-center justify-between p-2 bg-gray-50 rounded-lg';
+                fileItem.innerHTML = `
+                    <span class="text-sm text-gray-700 truncate">${file.name}</span>
+                    <button data-index="${index}" class="remove-file-btn text-red-500 hover:text-red-700 ml-3 transition duration-150 text-sm font-semibold">
+                        移除
+                    </button>
+                `;
+                fileList.appendChild(fileItem);
+            });
+        }
+
+        // 處理檔案移除
+        fileList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('remove-file-btn')) {
+                const index = parseInt(e.target.dataset.index);
+                uploadedFiles.splice(index, 1);
+                renderFileList();
+            }
+        });
+
+        // 處理檔案選擇 (input change)
+        fileInput.addEventListener('change', (e) => {
+            clearErrorMessage();
+            const newFiles = Array.from(e.target.files).filter(file => {
+                const ext = file.name.split('.').pop().toLowerCase();
+                if (ext !== 'srt' && ext !== 'ass') {
+                    showErrorMessage(`檔案 "${file.name}" 格式不支援。只接受 .srt 和 .ass 檔案。`);
+                    return false;
+                }
+                return true;
+            });
+            uploadedFiles = uploadedFiles.concat(newFiles);
+            renderFileList();
+            // 清空 input 讓用戶可以重新上傳相同檔案
+            fileInput.value = '';
+        });
+
+        // 拖放事件處理
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
+        });
+
+        dropArea.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            fileInput.files = dt.files;
+            fileInput.dispatchEvent(new Event('change')); // 觸發 change 事件
+        }, false);
+
+        // 點擊上傳區觸發檔案選擇
+        dropArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // --- 處理並自動下載檔案 ---
+
+        processButton.addEventListener('click', async () => {
+            clearErrorMessage();
+            downloadLinksDiv.innerHTML = '';
+            downloadArea.classList.add('hidden');
+            processingMessageDiv.classList.remove('hidden');
+            processingMessageDiv.textContent = "正在處理檔案..."; 
+
+            const originalFps = parseFloat(originalFpsInput.value);
+            const targetFps = parseFloat(targetFpsInput.value);
+            const shiftTimeSeconds = parseFloat(shiftTimeSecondsInput.value); 
+            const shiftMs = Math.round(shiftTimeSeconds * 1000); 
+            const enableS2T = s2tToggle.checked; // 取得 S2T 狀態
+
+            if (isNaN(originalFps) || isNaN(targetFps) || originalFps <= 0 || targetFps <= 0) {
+                showErrorMessage("請輸入有效的正數禎率。");
+                processingMessageDiv.classList.add('hidden');
+                return;
+            }
+            if (isNaN(shiftTimeSeconds)) {
+                showErrorMessage("時間平移值無效。");
+                processingMessageDiv.classList.add('hidden');
+                return;
+            }
+
+
+            const results = [];
+            let hasError = false;
+
+            for (const file of uploadedFiles) {
+                try {
+                    const fileExtension = file.name.split('.').pop().toLowerCase();
+                    let fileContent = await readFileContent(file);
+
+                    // 1. 調整字幕內容 (禎率和平移)
+                    let newContent = adjustSubtitles(fileContent, originalFps, targetFps, shiftMs, fileExtension);
+
+                    // 2. 如果啟用 S2T，進行本地字元轉換
+                    if (enableS2T) {
+                        processingMessageDiv.textContent = `正在處理檔案 "${file.name}" 並進行簡轉繁...`;
+                        newContent = s2tConversion(newContent);
+                    }
+                    
+                    // 創建 Blob 和下載 URL
+                    const blob = new Blob([newContent], { type: `text/${fileExtension};charset=utf-8` });
+                    const url = URL.createObjectURL(blob);
+
+                    // 創建新檔名 (例如: original.24to24.srt 或 original.24to24.s2t.srt)
+                    let newFileName = file.name.replace(`.${fileExtension}`, `.${originalFps}to${targetFps}`);
+                    if (enableS2T) {
+                        newFileName += '.s2t';
+                    }
+                    newFileName += `.${fileExtension}`;
+
+                    // *** 根據您的要求：不修改檔名 ***
+                    // 重新將檔名設定回原始檔名，以確保不會更動
+                    const finalFileName = file.name;
+
+                    results.push({ name: finalFileName, url: url });
+                } catch (error) {
+                    hasError = true;
+                    showErrorMessage(`處理檔案 "${file.name}" 時發生錯誤: ${error.message}`);
+                    break;
+                }
+            }
+
+            processingMessageDiv.classList.add('hidden');
+
+            if (!hasError) {
+                let downloadCount = 0;
+                // 自動下載所有檔案
+                for (const result of results) {
+                    const link = document.createElement('a');
+                    link.href = result.url;
+                    link.download = result.name; // 使用原始檔名
+                    // 必須添加到 DOM 才能在某些瀏覽器中工作
+                    document.body.appendChild(link); 
+
+                    link.click();
+                    // 點擊後移除，保持 DOM 清潔
+                    document.body.removeChild(link); 
+
+                    downloadCount++;
+
+                    // 增加延遲 (300ms) 以避免瀏覽器封鎖多個下載
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+
+                // 顯示成功訊息
+                downloadLinksDiv.innerHTML = `
+                    <div class="p-4 bg-green-100 text-green-800 rounded-lg font-semibold text-center">
+                        ✅ 成功處理並自動下載了 ${downloadCount} 個檔案。請檢查您的下載資料夾。
+                    </div>
+                `;
+                downloadArea.classList.remove('hidden');
+
+            }
+        });
+
+        /**
+         * 異步讀取檔案內容
+         * @param {File} file - 待讀取的檔案物件
+         * @returns {Promise<string>} 檔案內容的 Promise
+         */
+        function readFileContent(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                // 嘗試使用 UTF-8 讀取，這是字幕檔最常見的編碼
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = (e) => reject(new Error('檔案讀取失敗或編碼問題，請確保檔案為 UTF-8 編碼。'));
+                reader.readAsText(file, 'UTF-8');
+            });
+        }
+
+        // 初始化
+        renderFileList();
+
+    </script>
+</body>
+</html>
